@@ -1,104 +1,115 @@
 import dash
-from dash import dcc, html, dash_table
+from dash import dcc, html, callback_context, dash_table
 from dash.dependencies import Input, Output, State
 import pandas as pd
 import numpy as np
-import plotly.graph_objs as go
+import plotly.graph_objects as go
 import base64
 import io
 
 app = dash.Dash(__name__)
 
-# Initial app layout with placeholders
 app.layout = html.Div([
-    html.H3("Group stage - Intercompany Collaboration", style={'text-align': 'center'}),
+    html.H1("Manual Integrator", style={'textAlign': 'center'}),
     dcc.Upload(
         id='upload-data',
         children=html.Button('Open New CSV-File'),
         multiple=False
     ),
-    html.Div(id='file-label', style={'margin-top': '10px'}),
-    dcc.Graph(id='main-graph'),
-    html.Button('Export Boundaries', id='export-button', n_clicks=0),
-    dcc.Download(id='download-boundaries'),
-    html.Div(id='boundary-message', style={'color': 'red'}),
+    html.Div(id='file-info', style={'margin': '10px'}),
+    dcc.Graph(id='graph', config={'modeBarButtonsToAdd': ['drawline']}),
+    html.Button('Export Boundaries', id='export-btn'),
+    dcc.Download(id='download'),
+    html.Button('Import Boundaries', id='import-btn'),
+    dcc.Upload(id='upload-markers', children=html.Div(['Drag and Drop or ', html.A('Select a File')]), multiple=False),
     dash_table.DataTable(
-        id='markers-list',
-        columns=[{"name": "Markers", "id": "marker"}],
-        style_table={'overflowX': 'scroll'},
-        style_cell={'textAlign': 'left'},
-        data=[]
+        id='markers-table',
+        columns=[{"name": i, "id": i} for i in ['Marker Position']],
+        data=[],
+        style_table={'margin': '20px'}
     )
 ])
 
-def parse_contents(contents, filename):
+def parse_contents(contents):
     content_type, content_string = contents.split(',')
     decoded = base64.b64decode(content_string)
-    try:
-        if 'csv' in filename:
-            # Assume that the user uploaded a CSV file
-            return pd.read_csv(io.StringIO(decoded.decode('utf-8')))
-        else:
-            return None
-    except Exception as e:
-        print(e)
-        return None
+    return decoded
 
-# Callback to handle file uploads and update graph
 @app.callback(
-    [Output('file-label', 'children'),
-     Output('main-graph', 'figure')],
+    Output('file-info', 'children'),
+    Output('graph', 'figure'),
     Input('upload-data', 'contents'),
     State('upload-data', 'filename')
 )
-def update_graph(contents, filename):
+def update_graph(contents, file_name):
     if contents is None:
-        return "No file selected", go.Figure()
+        return "No file uploaded", go.Figure()
 
-    df = parse_contents(contents, filename)
-    if df is None or len(df.columns) < 2:
-        return f"Failed to load {filename}", go.Figure()
+    decoded_content = parse_contents(contents)
+    try:
+        df = pd.read_csv(io.StringIO(decoded_content.decode("utf-8")))
+    except Exception as e:
+        return f"Error loading file: {str(e)}", go.Figure()
 
     x_data = df[df.columns[0]]
     y_data = df[df.columns[1]]
-    
-    # Plot the data
-    figure = go.Figure(data=go.Scatter(x=x_data, y=y_data, mode='lines', name='Signal'))
-    figure.update_layout(title=f"File: {filename}", xaxis_title='X', yaxis_title='Y')
-    return f"Current file: {filename}", figure
 
-# Manage markers using clickData and manage export functionality
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=x_data, y=y_data, mode='lines', name='Signal'))
+    fig.update_layout(title=file_name, xaxis={'title': df.columns[0]}, yaxis={'title': df.columns[1]})
+    return f"Current file: {file_name}", fig
+
 @app.callback(
-    Output('markers-list', 'data'),
-    Output('boundary-message', 'children'),
-    Input('main-graph', 'clickData'),
-    State('markers-list', 'data')
+    Output('markers-table', 'data'),
+    Input('graph', 'relayoutData'),
+    State('markers-table', 'data')
 )
-def manage_markers(clickData, existing_data):
-    if clickData:
-        marker_x = clickData['points'][0]['x']
-        marker_y = clickData['points'][0]['y']
-        
-        # Simple logic to check if a similar marker already exists
-        if any(d['marker'] == (marker_x, marker_y) for d in existing_data):
-            return existing_data, "Marker already exists"
-        
-        existing_data.append({'marker': (marker_x, marker_y)})
-        return existing_data, ""
-    return existing_data, ""
+def manage_markers(relayoutData, existing_data):
+    ctx = callback_context
+    if not ctx.triggered:
+        return existing_data
 
-# Export markers
+    # Check if a line has been drawn
+    if 'shapes' in relayoutData:
+        line = relayoutData['shapes'][-1]  # The last shape drawn
+        if line['type'] == 'line':
+            x0 = line['x0']
+            existing_data.append({'Marker Position': x0})
+            return existing_data
+
+    return existing_data
+
 @app.callback(
-    Output('download-boundaries', 'data'),
-    Input('export-button', 'n_clicks'),
-    State('markers-list', 'data'),
+    Output('download', 'data'),
+    Input('export-btn', 'n_clicks'),
+    State('markers-table', 'data'),
     prevent_initial_call=True
 )
-def export_markers(n_clicks, rows):
-    if n_clicks > 0 and rows:
-        df = pd.DataFrame(rows)
-        return dcc.send_data_frame(df.to_csv, 'markers.csv', index=False)
-    return None
+def export_markers(n_clicks, data):
+    if not data:
+        return None
+
+    df_export = pd.DataFrame(data)
+    return dcc.send_data_frame(df_export.to_csv, "markers.csv", index=False)
+
+@app.callback(
+    Output('markers-table', 'data'),
+    Input('upload-markers', 'contents'),
+    prevent_initial_call=True
+)
+def import_markers(contents):
+    if contents is None:
+        return []
+
+    decoded_content = parse_contents(contents)
+    try:
+        lines = decoded_content.decode("utf-8").strip().split('\n')
+        data = [{'Marker Position': float(line.split(',')[0])} for line in lines]
+    except Exception as e:
+        return []
+
+    return data
 
 if __name__ == '__main__':
     app.run_server(debug=True)
+
