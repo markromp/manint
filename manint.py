@@ -1,11 +1,11 @@
 import dash
-from dash import dcc, html, dash_table, callback_context
+from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output, State
 import plotly.graph_objs as go
 import pandas as pd
 import numpy as np
-import io
 import base64
+import io
 
 app = dash.Dash(__name__)
 
@@ -16,7 +16,7 @@ app.layout = html.Div([
         children=html.Button('Open New CSV-File'),
         style={'display': 'block', 'margin': '10px auto'}
     ),
-    html.Div(id='file-label', style={'textAlign': 'center'}),
+    html.Div(id='file-label', style={'textAlign': 'center', 'margin': '10px'}),
     dcc.Graph(id='graph', config={'modeBarButtonsToAdd': ['drawline']}),
     html.Div([
         html.Button('Export Boundaries', id='export-button', n_clicks=0),
@@ -77,8 +77,7 @@ def update_graph(contents, filename):
     State('markers-table', 'data')
 )
 def manage_markers(relayoutData, existing_data):
-    ctx = callback_context
-    if not ctx.triggered or 'shapes' not in relayoutData:
+    if relayoutData is None or 'shapes' not in relayoutData:
         return existing_data
 
     new_data = []
@@ -87,8 +86,7 @@ def manage_markers(relayoutData, existing_data):
         if shape['type'] == 'line' and shape['x0'] == shape['x1']:
             pos = shape['x0']
             new_data.append({'position': pos})
-            
-    # Append new markers only if they are unique
+
     updated_positions = set([item['position'] for item in existing_data])
     for item in new_data:
         if item['position'] not in updated_positions:
@@ -99,7 +97,7 @@ def manage_markers(relayoutData, existing_data):
 @app.callback(
     Output('download-markers', 'data'),
     Input('export-button', 'n_clicks'),
-    State('markers-table', 'data'),
+    [State('markers-table', 'data')],
     prevent_initial_call=True
 )
 def export_markers(n_clicks, marker_data):
