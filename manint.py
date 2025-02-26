@@ -1,5 +1,5 @@
 import dash
-from dash import dcc, html, dash_table
+from dash import dcc, html, dash_table, callback_context
 from dash.dependencies import Input, Output, State
 import plotly.graph_objs as go
 import pandas as pd
@@ -19,9 +19,9 @@ app.layout = html.Div([
     html.Div(id='file-label', style={'textAlign': 'center', 'margin': '10px'}),
     dcc.Graph(id='graph', config={'modeBarButtonsToAdd': ['drawline']}),
     html.Div([
-        html.Button('Export Boundaries', id='export-button', n_clicks=0),
+        html.Button('Export Boundaries', id='export-button'),
         dcc.Download(id='download-markers')
-    ], style={'textAlign': 'center', 'margin': '10px'}),
+    ], style={'textAlign': 'center'}),
     dcc.Upload(
         id='upload-markers',
         children=html.Div(['Drag and Drop or ', html.A('Select a File for Import Boundaries')]),
@@ -77,7 +77,8 @@ def update_graph(contents, filename):
     State('markers-table', 'data')
 )
 def manage_markers(relayoutData, existing_data):
-    if relayoutData is None or 'shapes' not in relayoutData:
+    ctx = callback_context
+    if not ctx.triggered or 'shapes' not in relayoutData:
         return existing_data
 
     new_data = []
